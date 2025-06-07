@@ -1,0 +1,128 @@
+name: Verify Jest Setup
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'package.json'
+      - 'jest.config.ts'
+      - 'tsconfig.json'
+      - 'jest.setup.ts'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    if: github.event.head_commit.message == 'setup jest'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.head_commit.id }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check Step 1 - Dependencies
+        id: check_step1
+        run: |
+          if jq -e '.devDependencies | has("jest") and has("jest-environment-jsdom") and has("@testing-library/react") and has("@testing-library/dom") and has("@testing-library/jest-dom") and has("ts-node") and has("@types/jest")' package.json; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 2 - jest.config.ts exists
+        id: check_step2
+        run: |
+          if test -f jest.config.ts; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 4 - jest.config.ts content
+        id: check_step4
+        run: |
+          if grep -q "testEnvironment: 'jsdom'" jest.config.ts && grep -q "coverageProvider: 'v8'" jest.config.ts && grep -q "nextJest" jest.config.ts; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 5 - setupFilesAfterEnv
+        id: check_step5
+        run: |
+          if grep -q "setupFilesAfterEnv: \['<rootDir>/jest.setup.ts'\]" jest.config.ts; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 6 - jest.setup.ts content
+        id: check_step6
+        run: |
+          if test -f jest.setup.ts && grep -q "import '@testing-library/jest-dom'" jest.setup.ts; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 7 - tsconfig.json
+        id: check_step7
+        run: |
+          if jq -e '.compilerOptions.baseUrl == "./" and .compilerOptions.paths["@/components/*"] == ["components/*"]' tsconfig.json; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Step 8 - moduleNameMapper
+        id: check_step8
+        run: |
+          if grep -q "moduleNameMapper: {" jest.config.ts && grep -q "'^@/components/(.*)$': '<rootDir>/components/$1'" jest.config.ts; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine failed steps
+        id: determine_failed
+        run: |
+          failed_steps=""
+          if [ "${{ steps.check_step1.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 1"; fi
+          if [ "${{ steps.check_step2.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 2"; fi
+          if [ "${{ steps.check_step4.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 4"; fi
+          if [ "${{ steps.check_step5.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 5"; fi
+          if [ "${{ steps.check_step6.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 6"; fi
+          if [ "${{ steps.check_step7.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 7"; fi
+          if [ "${{ steps.check_step8.outputs.passed }}" != "true" ]; then failed_steps="$failed_steps Step 8"; fi
+          if [ -z "$failed_steps" ]; then
+            echo "all_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "all_passed=false" >> $GITHUB_OUTPUT
+            echo "failed_steps=$failed_steps" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update README
+        if: always()
+        run: |
+          if [ "${{ steps.determine_failed.outputs.all_passed }}" == "true" ]; then
+            echo "Congratulations you have successfully setup jest lets start by writing tests now" > README.md
+          else
+            failed_steps="${{ steps.determine_failed.outputs.failed_steps }}"
+            echo -e "\n## Failed Steps\n\nThe following steps have failed:\n" >> README.md
+            for step in $failed_steps; do
+              echo "- $step" >> README.md
+            done
+          fi
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Update README with setup status
